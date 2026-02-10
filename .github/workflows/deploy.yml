@@ -1,0 +1,54 @@
+name: Deploy taskapp to AWS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region $AWS_REGION \
+        | docker login --username AWS \
+        --password-stdin ${{ secrets.ECR_REPOSITORY }}
+
+    - name: Build Docker Image
+      run: |
+        docker build -t taskapp .
+
+    - name: Tag Docker Image
+      run: |
+        docker tag taskapp:latest \
+        ${{ secrets.ECR_REPOSITORY }}:latest
+
+    - name: Push Image to ECR
+      run: |
+        docker push ${{ secrets.ECR_REPOSITORY }}:latest
+
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          docker pull ${{ secrets.ECR_REPOSITORY }}:latest
+          docker stop taskapp-container || true
+          docker rm taskapp-container || true
+          docker run -d -p 3000:3000 \
+            --name taskapp-container \
+            ${{ secrets.ECR_REPOSITORY }}:latest
